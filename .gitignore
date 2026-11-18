@@ -1,0 +1,43 @@
+# ===== CMake 빌드 결과물 =====
+# CMakePresets.json의 binaryDir이 build/ 이다.
+build/
+out/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+
+# 개인용 프리셋 (팀 공유용 CMakePresets.json은 커밋한다)
+CMakeUserPresets.json
+
+# ===== vcpkg =====
+# 매니페스트 모드에서 설치된 패키지. configure할 때 vcpkg.json을 보고 다시 설치된다.
+vcpkg_installed/
+
+# ===== IDE / 에디터 =====
+# Visual Studio
+.vs/
+*.user
+*.suo
+# VS Code
+.vscode/
+# CLion / Rider
+.idea/
+
+# ===== 빌드 산출물 (build/ 밖에서 빌드했을 때 대비) =====
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+
+# ===== 실행 중 생기는 파일 =====
+logs/
+*.log
+*.dmp
+
+# ===== OS =====
+Thumbs.db
+Desktop.ini
+.DS_Store
