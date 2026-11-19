@@ -10,10 +10,12 @@ endif()
 find_package(asio CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
-add_executable(server server/main.cpp)
-target_include_directories(server PRIVATE shared)
+add_executable(server server/Main.cpp server/net/Listener.cpp server/net/Session.cpp)
+target_include_directories(server PRIVATE shared server)
+
 target_link_libraries(server PRIVATE asio::asio spdlog::spdlog)
 target_compile_definitions(server PRIVATE _WIN32_WINNT=0x0A00)
+
 
 add_executable(dummy_client dummy_client/main.cpp)
 target_include_directories(dummy_client PRIVATE shared)
