@@ -4,8 +4,8 @@
 #include <string_view>
 #include <spdlog/spdlog.h>
 
-Session::Session(asio::ip::tcp::socket socket, uint64_t id)
-	:socket_(std::move(socket)),id_(id)
+Session::Session(asio::ip::tcp::socket socket, asio::io_context& logicIo,uint64_t id)
+	:socket_(std::move(socket)), logicIo_(logicIo),id_(id)
 {
 }
 
@@ -158,7 +158,19 @@ bool Session::ProcessRecvBuffer()
 		const uint8_t* body = recvBuffer_.data() + offset + kHeaderSize;
 		spdlog::info("[Session {}] packet id={} len={}", id_, hdr.id, hdr.bodyLen);
 
-		Send(PacketId::S2C_Echo, body, hdr.bodyLen); //  추가: 임시 에코.
+		// 본문 복사한다.
+		std::vector<uint8_t> bodyCopy(body, body + hdr.bodyLen);
+
+		// 로직 스레드를 넘긴다.
+		asio::post(logicIo_,
+			[self = shared_from_this(), id = hdr.id, bodyCopy = std::move(bodyCopy)]()
+			{
+				// 여기서 부터 로직 스레드에서 실행된다.
+				spdlog::info("[Logic] session {} packet id={} len={}", self->id_, id, bodyCopy.size());
+
+				// 임시 처리: 에코
+				self->Send(PacketId::S2C_Echo, bodyCopy.data(), static_cast<uint16_t>(bodyCopy.size()));
+			});
 
 		offset += packetSize;
 	}

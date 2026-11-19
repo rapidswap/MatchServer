@@ -12,7 +12,10 @@ int main()
 	try
 	{
 		asio::io_context io;
-		Listener listener(io, 7777);   // 포트가 이미 사용 중이면 여기서 예외
+		asio::io_context logicIo;
+		auto logicGuard = asio::make_work_guard(logicIo);
+
+		Listener listener(io,logicIo, 7777);   // 포트가 이미 사용 중이면 여기서 예외
 
 		listener.Start();
 
@@ -21,7 +24,21 @@ int main()
 			{
 				spdlog::info("shutting down...");
 				listener.Stop();
+				logicGuard.reset();
+				logicIo.stop();
 				io.stop();
+			});
+
+		std::jthread logicThread([&logicIo]
+			{
+				try
+				{
+					logicIo.run();
+				}
+				catch (const std::exception& e)
+				{
+					spdlog::critical("logic thread error: {}", e.what());
+				}
 			});
 
 		const unsigned threadCount = 4;

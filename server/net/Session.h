@@ -10,7 +10,7 @@
 class Session :public std::enable_shared_from_this<Session>
 {
 public:
-	Session(asio::ip::tcp::socket socket, uint64_t id);
+	Session(asio::ip::tcp::socket socket, asio::io_context& logicIo,uint64_t id);
 	~Session();
 	
 	void Start();
@@ -28,7 +28,9 @@ private:
 
 private:
 	asio::ip::tcp::socket socket_;
+	asio::io_context& logicIo_;
 	uint64_t id_;
+
 	std::array<uint8_t, 4096> readChunk_ {};
 	std::vector<uint8_t> recvBuffer_;
 	bool closed_ = false;

@@ -5,7 +5,7 @@
 class Listener
 {
 public:
-	Listener(asio::io_context& io, uint16_t port);
+	Listener(asio::io_context& io,asio::io_context& logicIo, uint16_t port);
 	
 	void Start();
 	
@@ -16,6 +16,8 @@ private:
 
 private:
 	asio::io_context& io_;
+	asio::io_context& logicIo_;
+
 	asio::ip::tcp::acceptor acceptor_;
 
 
