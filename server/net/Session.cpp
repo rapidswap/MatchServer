@@ -1,5 +1,6 @@
 #include "Session.h"
-
+#include "PacketDefs.h"     
+#include <cstring>          
 #include <string_view>
 #include <spdlog/spdlog.h>
 
@@ -30,7 +31,7 @@ void Session::Start()
 void Session::DoRead()
 {
 	auto self = shared_from_this();
-	socket_.async_read_some(asio::buffer(readBuffer_),
+	socket_.async_read_some(asio::buffer(readChunk_),
 		[this, self](std::error_code ec, std::size_t bytes)
 		{
 			if (ec)
@@ -40,32 +41,16 @@ void Session::DoRead()
 				return;
 			}
 
-			// 받은 만큼만 문자열로 보여준다
-			std::string_view text(reinterpret_cast<const char*>(readBuffer_.data()), bytes);
-			spdlog::info("[Session {}] recv {} bytes: {}", id_, bytes, text);
+			recvBuffer_.insert(recvBuffer_.end(), readChunk_.begin(), readChunk_.begin() + bytes);
+			if (!ProcessRecvBuffer())
+			{
+				return;
+			}
 
-			DoWrite(bytes);   // 다음 데이터 대기
+			DoRead();   // 다음 데이터 대기
 		});
 }
 
-void Session::DoWrite(std::size_t length)
-{
-	auto self = shared_from_this();
-	asio::async_write(socket_, asio::buffer(readBuffer_.data(), length),
-		[this, self](std::error_code ec, std::size_t bytes)
-		{
-			if (ec)
-			{
-				// 연결이 끝났거나 에러: 더 이상 작업을 걸지 않는다 → self가 사라지며 Session 소멸
-				Close(ec);
-				return;
-			}
-			std::string_view text(reinterpret_cast<const char*>(readBuffer_.data()), bytes);
-			spdlog::info("[Session {}] sent {} bytes: {}", id_, bytes, text);
-			DoRead();
-		}
-	);
-}
 
 void Session::Close(const std::error_code& ec)
 {
@@ -78,21 +63,59 @@ void Session::Close(const std::error_code& ec)
 
 	if (ec == asio::error::eof)
 	{
-		spdlog::info("[Session {}] Disconnected",id_);
+		spdlog::info("[Session {}] Disconnected", id_);
 	}
 	else if (ec == asio::error::connection_reset)
 	{
-		spdlog::info("[Session {}] Disconnected (reset)",id_);
+		spdlog::info("[Session {}] Disconnected (reset)", id_);
 	}
 	else if (ec == asio::error::operation_aborted)
 	{
 	}
 	else
 	{
-		spdlog::warn("[Session {}] error: {}",id_,ec.message());
+		spdlog::warn("[Session {}] error: {}", id_, ec.message());
 	}
 
 	std::error_code ignore;
 	socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ignore);
 	socket_.close(ignore);
+}
+
+bool Session::ProcessRecvBuffer()
+{
+	size_t offset = 0;
+
+	while (true)
+	{
+		const size_t remain = recvBuffer_.size() - offset;
+		if (remain < kHeaderSize)
+		{
+			break;
+		}
+
+		PacketHeader hdr;
+		std::memcpy(&hdr, recvBuffer_.data() + offset, kHeaderSize);
+
+		if(hdr.bodyLen>kMaxBodySize)
+		{
+			spdlog::warn("[Session {}] invalid bodyLen {}",id_,hdr.bodyLen);
+			Close(asio::error::make_error_code(asio::error::message_size));
+			return false;
+		}
+
+		const size_t packetSize = kHeaderSize + hdr.bodyLen;
+		if (remain < packetSize)
+		{
+			break;
+		}
+
+		const uint8_t* body = recvBuffer_.data() + offset + kHeaderSize;
+		spdlog::info("[Session {}] packet id={} len={}", id_, hdr.id, hdr.bodyLen);
+
+		offset += packetSize;
+	}
+
+	recvBuffer_.erase(recvBuffer_.begin(), recvBuffer_.begin() + offset);
+	return true;
 }

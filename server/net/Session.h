@@ -1,6 +1,7 @@
 #pragma once
 #include <asio.hpp>
 #include <array>
+#include <vector>
 #include <cstdint>
 #include <memory>
 
@@ -15,13 +16,14 @@ public:
 private:
 	void DoRead();
 
-	void DoWrite(std::size_t length);
-
 	void Close(const std::error_code& ec);
+
+	bool ProcessRecvBuffer();
 
 private:
 	asio::ip::tcp::socket socket_;
 	uint64_t id_;
-	std::array<uint8_t, 4096> readBuffer_{};
+	std::array<uint8_t, 4096> readChunk_ {};
+	std::vector<uint8_t> recvBuffer_;
 	bool closed_ = false;
 };

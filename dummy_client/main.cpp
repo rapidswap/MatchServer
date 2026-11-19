@@ -1,17 +1,106 @@
 #include <spdlog/spdlog.h>
 #include <asio.hpp>
-
-#include <array>
+#include "PacketDefs.h"
 #include <chrono>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
+
+std::vector<uint8_t> MakePacket(PacketId id, std::string_view body)
+{
+	PacketHeader hdr{};
+	hdr.bodyLen = static_cast<uint16_t>(body.size());
+	hdr.id = static_cast<uint16_t>(id);
+
+	std::vector<uint8_t> buf(kHeaderSize + body.size());
+
+	std::memcpy(buf.data(), &hdr, kHeaderSize);
+	std::memcpy(buf.data() + kHeaderSize, body.data(), body.size());
+
+	return buf;
+}
+
+// 지금은 서버가 답장을 안 보내므로 호출하지 않는다 (2-3 송신 큐 이후 사용)
+std::pair<uint16_t, std::vector<uint8_t>> RecvPacket(asio::ip::tcp::socket& socket)
+{
+	PacketHeader hdr{};
+	asio::read(socket, asio::buffer(&hdr, kHeaderSize));
+	
+	std::vector<uint8_t> body(hdr.bodyLen);
+	if (hdr.bodyLen > 0)
+	{
+		asio::read(socket, asio::buffer(body));
+	}
+
+	return { hdr.id,std::move(body) };
+}
+
+void RunNormal(asio::ip::tcp::socket& socket, int clientNo)
+{
+	for (int i = 0; i < 5; ++i)
+	{
+		std::string msg = "client" + std::to_string(clientNo) + " msg" + std::to_string(i);
+		auto pkt = MakePacket(PacketId::C2S_Echo, msg);
+		asio::write(socket, asio::buffer(pkt));
+		spdlog::info("[client {}] sent id={} len={} : {}", clientNo,
+			static_cast<uint16_t>(PacketId::C2S_Echo), msg.size(), msg);
+		std::this_thread::sleep_for(std::chrono::seconds(1));
+	}
+}
+
+// 패킷 하나를 cut 바이트에서 둘로 잘라 보낸다.
+// cut < 4  : 헤더도 덜 온 상태  → 서버 ProcessRecvBuffer의 첫 번째 break
+// cut >= 4 : 헤더는 왔지만 본문이 덜 온 상태 → 두 번째 break
+void RunSplit(asio::ip::tcp::socket& socket, int clientNo, std::size_t cut)
+{
+	std::string msg = "client" + std::to_string(clientNo) + " split";
+	auto pkt = MakePacket(PacketId::C2S_Echo, msg);
+
+	asio::write(socket, asio::buffer(pkt.data(), cut));
+	spdlog::info("[client {}] sent first {} bytes (of {}), waiting 2s...", clientNo, cut, pkt.size());
+	std::this_thread::sleep_for(std::chrono::seconds(2));
+
+	asio::write(socket, asio::buffer(pkt.data() + cut, pkt.size() - cut));
+	spdlog::info("[client {}] sent remaining {} bytes", clientNo, pkt.size() - cut);
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+}
+
+// 패킷 두 개를 버퍼 하나에 이어 붙여 write 한 번으로 보낸다
+void RunMerge(asio::ip::tcp::socket& socket, int clientNo)
+{
+	auto a = MakePacket(PacketId::C2S_Echo, "first");
+	auto b = MakePacket(PacketId::C2S_Echo, "second");
+	a.insert(a.end(), b.begin(), b.end());
+
+	asio::write(socket, asio::buffer(a));
+	spdlog::info("[client {}] sent 2 packets in one write ({} bytes)", clientNo, a.size());
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+}
+
+// bodyLen이 최대치(16KB)를 넘는 헤더만 보낸다. 서버가 끊어야 정상
+void RunOversize(asio::ip::tcp::socket& socket, int clientNo)
+{
+	PacketHeader hdr{};
+	hdr.bodyLen = 20000;
+	hdr.id = static_cast<uint16_t>(PacketId::C2S_Echo);
+	asio::write(socket, asio::buffer(&hdr, kHeaderSize));
+	spdlog::info("[client {}] sent header with bodyLen={}", clientNo, hdr.bodyLen);
+
+	// 서버가 끊었는지 확인: 끊겼으면 read가 eof/reset 예외를 던진다
+	uint8_t dummy;
+	asio::read(socket, asio::buffer(&dummy, 1));
+	spdlog::error("[client {}] server did NOT close the connection", clientNo);
+}
 
 int main(int argc, char* argv[])
 {
-	// 실행할 때 번호를 받는다: dummy_client.exe 1  → clientNo = 1
-	// 번호가 없으면 0. 창마다 번호를 다르게 주면 누가 보낸 메시지인지 구분된다.
+	// 사용법: dummy_client.exe [번호] [모드]
+	//   모드: normal(기본) | split | split6 | merge | oversize
 	int clientNo = argc > 1 ? std::stoi(argv[1]) : 0;
+	std::string mode = argc > 2 ? argv[2] : "normal";
 
 	try
 	{
@@ -23,25 +112,15 @@ int main(int argc, char* argv[])
 		asio::connect(socket, resolver.resolve("127.0.0.1", "7777"));
 		spdlog::info("[client {}] connected to server (my port {})", clientNo, socket.local_endpoint().port());
 
-		for (int i = 0; i < 5; ++i)
+		if (mode == "normal")        RunNormal(socket, clientNo);
+		else if (mode == "split")    RunSplit(socket, clientNo, 3);
+		else if (mode == "split6")   RunSplit(socket, clientNo, 6);
+		else if (mode == "merge")    RunMerge(socket, clientNo);
+		else if (mode == "oversize") RunOversize(socket, clientNo);
+		else
 		{
-			// 1) 보낼 메시지 만들기: "client1 msg0", "client1 msg1", ...
-			std::string msg = "client" + std::to_string(clientNo) + " msg" + std::to_string(i);
-
-			// 2) 보내기 (동기). 다 보낼 때까지 여기서 멈춘다
-			asio::write(socket, asio::buffer(msg));
-			spdlog::info("[client {}] sent: {}", clientNo, msg);
-
-			// 3) 받기 (동기). 서버가 돌려줄 때까지 여기서 멈춘다
-			//    read_some은 "도착한 만큼" 돌려주고, 받은 바이트 수를 반환한다
-			std::array<char, 1024> buf;
-			std::size_t n = socket.read_some(asio::buffer(buf));
-
-			// 4) 받은 n바이트만 문자열로 보기
-			spdlog::info("[client {}] recv: {}", clientNo, std::string_view(buf.data(), n));
-
-			// 5) 1초 쉬기: 다른 창에서 클라를 더 띄울 시간을 번다
-			std::this_thread::sleep_for(std::chrono::seconds(1));
+			spdlog::error("unknown mode: {} (normal|split|split6|merge|oversize)", mode);
+			return 1;
 		}
 
 		spdlog::info("[client {}] closing", clientNo);
