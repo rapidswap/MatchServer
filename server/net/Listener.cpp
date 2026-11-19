@@ -6,8 +6,8 @@
 
 using tcp = asio::ip::tcp;
 
-Listener::Listener(asio::io_context& io, asio::io_context& logicIo, uint16_t port)
-	:io_(io), logicIo_(logicIo), acceptor_(io, tcp::endpoint(tcp::v4(), port), false)
+Listener::Listener(asio::io_context& io, asio::io_context& logicIo, INetworkHandler& handler, uint16_t port)
+	:io_(io), logicIo_(logicIo),handler_(handler), acceptor_(io, tcp::endpoint(tcp::v4(), port), false)
 {
 }
 
@@ -29,7 +29,7 @@ void Listener::DoAccept()
             }
             if (!ec)
             {
-                std::make_shared<Session>(std::move(socket),logicIo_, nextSessionId_++)->Start();
+                std::make_shared<Session>(std::move(socket),logicIo_,handler_, nextSessionId_++)->Start();
             }
             DoAccept();   // 다음 접속 대기. 이게 없으면 한 명만 받고 끝
         });

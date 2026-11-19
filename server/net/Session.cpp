@@ -4,8 +4,8 @@
 #include <string_view>
 #include <spdlog/spdlog.h>
 
-Session::Session(asio::ip::tcp::socket socket, asio::io_context& logicIo,uint64_t id)
-	:socket_(std::move(socket)), logicIo_(logicIo),id_(id)
+Session::Session(asio::ip::tcp::socket socket, asio::io_context& logicIo,INetworkHandler& handler,uint64_t id)
+	:socket_(std::move(socket)), logicIo_(logicIo), handler_(handler), id_(id)
 {
 }
 
@@ -23,6 +23,12 @@ void Session::Start()
 	{
 		spdlog::info("[Session {}] Connected from {}:{}", id_, ep.address().to_string(), ep.port());
 	}
+
+
+	asio::post(logicIo_, [self = shared_from_this()]
+		{
+			self->handler_.OnConnected(self);
+		});
 
 	// 주소를 못 얻었더라도 읽기는 시작한다
 	DoRead();
@@ -105,8 +111,12 @@ void Session::Close(const std::error_code& ec)
 	}
 
 	closed_ = true;
-
-	if (ec == asio::error::eof)
+	
+	if (!ec)
+	{
+		spdlog::info("[Session {}] Disconnected (by server)", id_);
+	}
+	else if (ec == asio::error::eof)
 	{
 		spdlog::info("[Session {}] Disconnected", id_);
 	}
@@ -125,6 +135,11 @@ void Session::Close(const std::error_code& ec)
 	std::error_code ignore;
 	socket_.shutdown(asio::ip::tcp::socket::shutdown_both, ignore);
 	socket_.close(ignore);
+
+	asio::post(logicIo_, [self = shared_from_this()]
+		{
+			self->handler_.OnDisconnected(self);
+		});
 }
 
 bool Session::ProcessRecvBuffer()
@@ -158,18 +173,14 @@ bool Session::ProcessRecvBuffer()
 		const uint8_t* body = recvBuffer_.data() + offset + kHeaderSize;
 		spdlog::info("[Session {}] packet id={} len={}", id_, hdr.id, hdr.bodyLen);
 
-		// 본문 복사한다.
+		// 본문 복사한다. (recvBuffer_는 곧 erase된다)
 		std::vector<uint8_t> bodyCopy(body, body + hdr.bodyLen);
 
-		// 로직 스레드를 넘긴다.
+		// 로직 스레드로 넘긴다. 처리는 INetworkHandler(GameServer)가 한다.
 		asio::post(logicIo_,
-			[self = shared_from_this(), id = hdr.id, bodyCopy = std::move(bodyCopy)]()
+			[self = shared_from_this(), id = static_cast<PacketId>(hdr.id), bodyCopy = std::move(bodyCopy)]() mutable
 			{
-				// 여기서 부터 로직 스레드에서 실행된다.
-				spdlog::info("[Logic] session {} packet id={} len={}", self->id_, id, bodyCopy.size());
-
-				// 임시 처리: 에코
-				self->Send(PacketId::S2C_Echo, bodyCopy.data(), static_cast<uint16_t>(bodyCopy.size()));
+				self->handler_.OnPacket(self, id, std::move(bodyCopy));
 			});
 
 		offset += packetSize;
@@ -199,4 +210,17 @@ void Session::DoWrite()
 			}
 		});
 	
+}
+
+uint64_t Session::Id() const
+{
+	return id_;
+}
+
+void Session::Disconnect()
+{
+	asio::post(socket_.get_executor(), [self = shared_from_this()]
+		{
+			self->Close(std::error_code{});
+		});
 }

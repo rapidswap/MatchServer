@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <csignal>
 #include "net/Listener.h"
+#include "logic/GameServer.h"
 
 int main()
 {
@@ -12,10 +13,11 @@ int main()
 	try
 	{
 		asio::io_context io;
+		GameServer gameServer;
 		asio::io_context logicIo;
 		auto logicGuard = asio::make_work_guard(logicIo);
 
-		Listener listener(io,logicIo, 7777);   // 포트가 이미 사용 중이면 여기서 예외
+		Listener listener(io, logicIo, gameServer, 7777);   // 포트가 이미 사용 중이면 여기서 예외
 
 		listener.Start();
 
