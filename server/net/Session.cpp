@@ -28,6 +28,51 @@ void Session::Start()
 	DoRead();
 }
 
+void Session::Send(PacketId id, const uint8_t* body, uint16_t bodyLen)
+{
+	// 크기 검사.
+	if (bodyLen > kMaxBodySize)
+	{
+		spdlog::warn("[Session {}] Send: body too large {}", id_, bodyLen);
+		return;
+	}
+
+	// 헤더 만들기.
+	PacketHeader hdr{};
+	hdr.bodyLen = bodyLen;
+	hdr.id = static_cast<uint16_t>(id);
+
+	// [헤더][본문]을 담은 버퍼를 새로 만들고 복사.
+	std::vector<uint8_t> buf(kHeaderSize + bodyLen);
+	std::memcpy(buf.data(), &hdr, kHeaderSize);
+	if (bodyLen > 0)
+	{
+		std::memcpy(buf.data() + kHeaderSize, body, bodyLen);
+	}
+	// 세션 strand로 넘기기.
+	asio::post(socket_.get_executor(),
+		[self = shared_from_this(), buf = std::move(buf)]() mutable
+		{
+			// 여기부터는 세션 strand 안에서 실행된다.
+			if (self->closed_)
+			{
+				return;
+			}
+
+			// 이미 쓰는 중인지 판단.
+			const bool writing = !self->sendQueue_.empty();
+
+			// 큐에 넣기.
+			self->sendQueue_.push_back(std::move(buf));
+
+			// 쓰는 중이 아니었으면 내가 시작.
+			if (!writing)
+			{
+				self->DoWrite();
+			}
+		});
+}
+
 void Session::DoRead()
 {
 	auto self = shared_from_this();
@@ -113,9 +158,33 @@ bool Session::ProcessRecvBuffer()
 		const uint8_t* body = recvBuffer_.data() + offset + kHeaderSize;
 		spdlog::info("[Session {}] packet id={} len={}", id_, hdr.id, hdr.bodyLen);
 
+		Send(PacketId::S2C_Echo, body, hdr.bodyLen); //  추가: 임시 에코.
+
 		offset += packetSize;
 	}
 
 	recvBuffer_.erase(recvBuffer_.begin(), recvBuffer_.begin() + offset);
 	return true;
+}
+
+void Session::DoWrite()
+{
+	auto self = shared_from_this();
+	asio::async_write(socket_, asio::buffer(sendQueue_.front()),
+		[this, self](std::error_code ec, std::size_t /*bytes*/)
+		{
+			if (ec)
+			{
+				Close(ec);
+				return;
+			}
+
+			sendQueue_.pop_front();
+
+			if (!sendQueue_.empty())
+			{
+				DoWrite();
+			}
+		});
+	
 }

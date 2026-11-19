@@ -47,6 +47,11 @@ void RunNormal(asio::ip::tcp::socket& socket, int clientNo)
 		asio::write(socket, asio::buffer(pkt));
 		spdlog::info("[client {}] sent id={} len={} : {}", clientNo,
 			static_cast<uint16_t>(PacketId::C2S_Echo), msg.size(), msg);
+
+		auto [rid, rbody] = RecvPacket(socket);                                            // ①
+		std::string_view text(reinterpret_cast<const char*>(rbody.data()), rbody.size());  // ②
+		spdlog::info("[client {}] recv id={} len={} : {}", clientNo, rid, rbody.size(), text);
+
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
 }
