@@ -42,7 +42,7 @@ logs/
 *.sqlite
 *.sqlite3
 
-# ===== 비밀값 (EOS Client Secret, DB 접속 정보 등) =====
+# ===== 비밀값 (DB 접속 정보 등) =====
 .env
 .env.*
 *.secret
