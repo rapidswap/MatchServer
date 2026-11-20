@@ -9,6 +9,7 @@ endif()
 
 find_package(asio CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(server
 	server/Main.cpp
@@ -17,13 +18,11 @@ add_executable(server
 	server/logic/GameServer.cpp     
 )
 
-target_include_directories(server PRIVATE shared server)
-
-target_link_libraries(server PRIVATE asio::asio spdlog::spdlog)
+target_link_libraries(server PRIVATE asio::asio spdlog::spdlog nlohmann_json::nlohmann_json)
 target_compile_definitions(server PRIVATE _WIN32_WINNT=0x0A00)
-
+target_include_directories(server PRIVATE shared server)
 
 add_executable(dummy_client dummy_client/main.cpp)
 target_include_directories(dummy_client PRIVATE shared)
-target_link_libraries(dummy_client PRIVATE asio::asio spdlog::spdlog)
+target_link_libraries(dummy_client PRIVATE asio::asio spdlog::spdlog nlohmann_json::nlohmann_json)
 target_compile_definitions(dummy_client PRIVATE _WIN32_WINNT=0x0A00)

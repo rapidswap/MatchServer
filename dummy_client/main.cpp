@@ -8,6 +8,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 std::vector<uint8_t> MakePacket(PacketId id, std::string_view body)
 {
@@ -100,10 +101,39 @@ void RunOversize(asio::ip::tcp::socket& socket, int clientNo)
 	spdlog::error("[client {}] server did NOT close the connection", clientNo);
 }
 
+// JSON 요청 하나를 보내고 응답 하나를 받아 출력한다.
+void SendJsonAndPrint(asio::ip::tcp::socket& socket, int clientNo, PacketId id, const nlohmann::json& req)
+{
+	auto packet = MakePacket(id, req.dump());
+	asio::write(socket, asio::buffer(packet));
+	spdlog::info("[client {}] sent id={} body={}", clientNo, static_cast<uint16_t>(id), req.dump());
+
+	auto [respId, body] = RecvPacket(socket);
+	nlohmann::json resp = nlohmann::json::parse(body.begin(), body.end(), nullptr, false);
+	if (resp.is_discarded())
+	{
+		spdlog::error("[client {}] recv id={} invalid json", clientNo, respId);
+		return;
+	}
+	spdlog::info("[client {}] recv id={} body={}", clientNo, respId, resp.dump());
+}
+
+void RunRegister(asio::ip::tcp::socket& socket, int clientNo, const std::string& id, const std::string& pw, const std::string& nickname)
+{
+	SendJsonAndPrint(socket, clientNo, PacketId::C2S_Register, { {"id", id}, {"password", pw}, {"nickname", nickname} });
+}
+
+void RunLogin(asio::ip::tcp::socket& socket, int clientNo, const std::string& id, const std::string& pw)
+{
+	SendJsonAndPrint(socket, clientNo, PacketId::C2S_Login, { {"id", id}, {"password", pw} });
+}
+
 int main(int argc, char* argv[])
 {
-	// 사용법: dummy_client.exe [번호] [모드]
+	// 사용법: dummy_client.exe [번호] [모드] [모드별 인자...]
 	//   모드: normal(기본) | split | split6 | merge | oversize
+	//         register <id> <password> <nickname>
+	//         login    <id> <password>
 	int clientNo = argc > 1 ? std::stoi(argv[1]) : 0;
 	std::string mode = argc > 2 ? argv[2] : "normal";
 
@@ -122,9 +152,27 @@ int main(int argc, char* argv[])
 		else if (mode == "split6")   RunSplit(socket, clientNo, 6);
 		else if (mode == "merge")    RunMerge(socket, clientNo);
 		else if (mode == "oversize") RunOversize(socket, clientNo);
+		else if (mode == "register")
+		{
+			if (argc < 6)
+			{
+				spdlog::error("usage: dummy_client.exe <no> register <id> <password> <nickname>");
+				return 1;
+			}
+			RunRegister(socket, clientNo, argv[3], argv[4], argv[5]);
+		}
+		else if (mode == "login")
+		{
+			if (argc < 5)
+			{
+				spdlog::error("usage: dummy_client.exe <no> login <id> <password>");
+				return 1;
+			}
+			RunLogin(socket, clientNo, argv[3], argv[4]);
+		}
 		else
 		{
-			spdlog::error("unknown mode: {} (normal|split|split6|merge|oversize)", mode);
+			spdlog::error("unknown mode: {} (normal|split|split6|merge|oversize|register|login)", mode);
 			return 1;
 		}
 

@@ -1,5 +1,5 @@
 {
   "name": "matchserver",
   "version": "0.1.0",
-  "dependencies": [ "asio", "spdlog" ]
+  "dependencies": [ "asio", "spdlog", "nlohmann-json" ]
 }
