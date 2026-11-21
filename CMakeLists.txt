@@ -21,6 +21,7 @@ add_executable(server
 target_link_libraries(server PRIVATE asio::asio spdlog::spdlog nlohmann_json::nlohmann_json)
 target_compile_definitions(server PRIVATE _WIN32_WINNT=0x0A00)
 target_include_directories(server PRIVATE shared server)
+target_precompile_headers(server PRIVATE server/pch.h)
 
 add_executable(dummy_client dummy_client/main.cpp)
 target_include_directories(dummy_client PRIVATE shared)

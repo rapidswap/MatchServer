@@ -2,7 +2,6 @@
 #include "Session.h"
 
 #include <asio.hpp>
-#include <spdlog/spdlog.h>
 
 using tcp = asio::ip::tcp;
 

@@ -1,8 +1,5 @@
-#include <spdlog/spdlog.h>
 #include <asio.hpp>
 #include <thread>
-#include <vector>
-#include <algorithm>
 #include <csignal>
 #include "net/Listener.h"
 #include "logic/GameServer.h"

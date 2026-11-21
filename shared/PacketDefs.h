@@ -41,9 +41,9 @@ enum class PacketId : uint16_t
 enum class AuthResult : uint8_t
 {
 	Ok					= 0,
-	InvalidRequest		= 1, // 필드 누락, 길이 초과, JSON꺼짐
+	InvalidRequest		= 1, // 필드 누락, 타입 불일치, 길이 초과 (JSON 자체가 깨지면 응답 없이 연결 종료)
 	IdTaken				= 2, // 가입: 이미 있는 아이디.
 	NicknameTaken		= 3, // 가입: 이미 있는 닉네임
 	WrongCredentials	= 4, // 로그인: ID가 없거나 비밀번호가 틀림 (구분 안함)
-	ServerError			= 5, // DB 오류 등'
+	ServerError			= 5, // DB 오류 등
 };
