@@ -15,7 +15,8 @@ add_executable(server
 	server/Main.cpp
 	server/net/Listener.cpp
 	server/net/Session.cpp
-	server/logic/GameServer.cpp     
+	server/logic/GameServer.cpp 
+	server/db/MemoryAccountStore.cpp    
 )
 
 target_link_libraries(server PRIVATE asio::asio spdlog::spdlog nlohmann_json::nlohmann_json)

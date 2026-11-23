@@ -1,5 +1,6 @@
 #include "GameServer.h"
 #include "net/ISession.h"
+#include "logic/IAccountStore.h"
 
 namespace
 {
@@ -90,7 +91,27 @@ void GameServer::HandleLogin(const std::shared_ptr<ISession>& session, const nlo
 	}
 
 	spdlog::info("[Logic] session {} login request id={}", session->Id(), loginId);
-	SendJson(*session, PacketId::S2C_LoginResult, { {"result",AuthResult::Ok},{"accountId",0},{"nickname",loginId} });
+
+	std::weak_ptr<ISession> weak = session;
+	store_.Login(std::move(loginId), std::move(password),
+		[weak](AuthResult result, AccountInfo info)
+		{
+			auto s = weak.lock();
+			if (!s)
+			{
+				return;
+			}
+
+			if (result != AuthResult::Ok)
+			{
+				SendJson(*s, PacketId::S2C_LoginResult, { {"result", result} });
+				return;
+			}
+
+			spdlog::info("[Logic] session {} login ok accountId={}", s->Id(), info.accountId);
+			SendJson(*s, PacketId::S2C_LoginResult,
+				{ {"result", result}, {"accountId", info.accountId}, {"nickname", info.nickname} });
+		});
 }
 
 void GameServer::HandleRegister(const std::shared_ptr<ISession>& session, const nlohmann::json& req)
@@ -107,6 +128,17 @@ void GameServer::HandleRegister(const std::shared_ptr<ISession>& session, const 
 	}
 
 	spdlog::info("[Logic] session {} register request id={} nickname={}", session->Id(), loginId, nickname);
-	SendJson(*session, PacketId::S2C_RegisterResult, { {"result", AuthResult::Ok} });
+
+	std::weak_ptr<ISession> weak = session;
+	store_.Register(std::move(loginId), std::move(password), std::move(nickname),
+		[weak](AuthResult result)
+		{
+			auto s = weak.lock();
+			if (!s)
+			{
+				return;
+			}
+			SendJson(*s, PacketId::S2C_RegisterResult, { {"result", result} });
+		});
 
 }
