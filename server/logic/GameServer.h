@@ -1,6 +1,7 @@
 #pragma once
 #include "net/INetworkHandler.h"
 #include <nlohmann/json.hpp>
+#include "SessionManager.h"
 
 class IAccountStore;
 
@@ -19,4 +20,6 @@ private:
 
 private:
 	IAccountStore& store_;
+
+	SessionManager sessions_;
 };

@@ -15,7 +15,8 @@ add_executable(server
 	server/Main.cpp
 	server/net/Listener.cpp
 	server/net/Session.cpp
-	server/logic/GameServer.cpp 
+	server/logic/GameServer.cpp
+	server/logic/SessionManager.cpp
 	server/db/MemoryAccountStore.cpp    
 )
 

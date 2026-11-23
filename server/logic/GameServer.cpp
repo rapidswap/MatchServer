@@ -36,11 +36,26 @@ namespace
 
 void GameServer::OnConnected(std::shared_ptr<ISession> session)
 {
+	sessions_.Add(session);
 	spdlog::info("[Logic] session {} connected", session->Id());
 }
 
 void GameServer::OnPacket(std::shared_ptr<ISession> session, PacketId id, std::vector<uint8_t> body)
 {
+	PlayerSession* ps = sessions_.Find(session->Id());
+	if (!ps)
+	{
+		return; // 이미 해제 처리된 연결.
+	}
+
+	const bool isAuthPacket = (id == PacketId::C2S_Register || id == PacketId::C2S_Login);
+	if (ps->state != LoginState::LoggedIn && !isAuthPacket)
+	{
+		spdlog::warn("[Logic] session {} packet id={} before a login, disconnect", session->Id(),static_cast<uint16_t>(id));
+		session->Disconnect();
+		return;
+	}
+
 	switch (id)
 	{
 	case PacketId::C2S_Echo:
@@ -77,11 +92,20 @@ void GameServer::OnPacket(std::shared_ptr<ISession> session, PacketId id, std::v
 
 void GameServer::OnDisconnected(std::shared_ptr<ISession> session)
 {
+	sessions_.Remove(session->Id());
 	spdlog::info("[Logic] session {} disconnected", session->Id());
 }
 
 void GameServer::HandleLogin(const std::shared_ptr<ISession>& session, const nlohmann::json& req)
 {
+	PlayerSession* ps = sessions_.Find(session->Id());
+	if (!ps || ps->state != LoginState::Connected)
+	{
+		// 이미 로그인 중(LoggingIn)이거나 완료(LoggedIn) → 거절
+		SendJson(*session, PacketId::S2C_LoginResult, { {"result", AuthResult::InvalidRequest} });
+		return;
+	}
+
 	std::string loginId, password;
 
 	if (!GetString(req, "id", 32, loginId) || !GetString(req, "password", 64, password))
@@ -92,24 +116,33 @@ void GameServer::HandleLogin(const std::shared_ptr<ISession>& session, const nlo
 
 	spdlog::info("[Logic] session {} login request id={}", session->Id(), loginId);
 
-	std::weak_ptr<ISession> weak = session;
+	// 입력 검사를 통과하고 저장소로 요청이 실제로 나가는 순간이 LoggingIn의 시작
+	ps->state = LoginState::LoggingIn;
+
+	const uint64_t sessionId = session->Id();
 	store_.Login(std::move(loginId), std::move(password),
-		[weak](AuthResult result, AccountInfo info)
+		[this,sessionId](AuthResult result, AccountInfo info)
 		{
-			auto s = weak.lock();
-			if (!s)
+			PlayerSession* ps = sessions_.Find(sessionId);
+			if (!ps)
 			{
-				return;
+				return; // 결과 오기 전에 끊김.
 			}
 
 			if (result != AuthResult::Ok)
 			{
-				SendJson(*s, PacketId::S2C_LoginResult, { {"result", result} });
+				ps->state = LoginState::Connected;
+				SendJson(*ps->session, PacketId::S2C_LoginResult, { {"result", result} });
 				return;
 			}
+		
 
-			spdlog::info("[Logic] session {} login ok accountId={}", s->Id(), info.accountId);
-			SendJson(*s, PacketId::S2C_LoginResult,
+			ps->state = LoginState::LoggedIn;
+			ps->accountId = info.accountId;
+			ps->nickname = info.nickname;
+
+			spdlog::info("[Logic] session {} login ok accountId={}", sessionId, info.accountId);
+			SendJson(*ps->session, PacketId::S2C_LoginResult,
 				{ {"result", result}, {"accountId", info.accountId}, {"nickname", info.nickname} });
 		});
 }
@@ -120,6 +153,14 @@ void GameServer::HandleRegister(const std::shared_ptr<ISession>& session, const 
 	constexpr size_t kMaxPasswordLen = 64;
 	constexpr size_t kMaxNicknameLen = 32;
 
+	// 가입은 로그인 전(Connected)에만. 로그인 중이거나 이미 로그인한 연결은 거절
+	PlayerSession* ps = sessions_.Find(session->Id());
+	if (!ps || ps->state != LoginState::Connected)
+	{
+		SendJson(*session, PacketId::S2C_RegisterResult, { {"result", AuthResult::InvalidRequest} });
+		return;
+	}
+
 	std::string loginId, password, nickname;
 	if (!GetString(req, "id", kMaxIdLen, loginId) || !GetString(req, "password", kMaxPasswordLen, password) || !GetString(req, "nickname", kMaxNicknameLen, nickname))
 	{
@@ -129,16 +170,15 @@ void GameServer::HandleRegister(const std::shared_ptr<ISession>& session, const 
 
 	spdlog::info("[Logic] session {} register request id={} nickname={}", session->Id(), loginId, nickname);
 
-	std::weak_ptr<ISession> weak = session;
+	const uint64_t sessionId = session->Id();
 	store_.Register(std::move(loginId), std::move(password), std::move(nickname),
-		[weak](AuthResult result)
+		[this, sessionId](AuthResult result)
 		{
-			auto s = weak.lock();
-			if (!s)
+			PlayerSession* ps = sessions_.Find(sessionId);
+			if (!ps)
 			{
-				return;
+				return; // 결과 오기 전에 끊김
 			}
-			SendJson(*s, PacketId::S2C_RegisterResult, { {"result", result} });
+			SendJson(*ps->session, PacketId::S2C_RegisterResult, { {"result", result} });
 		});
-
 }

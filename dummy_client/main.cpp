@@ -24,7 +24,7 @@ std::vector<uint8_t> MakePacket(PacketId id, std::string_view body)
 	return buf;
 }
 
-// 지금은 서버가 답장을 안 보내므로 호출하지 않는다 (2-3 송신 큐 이후 사용)
+// 패킷 하나를 받는다 (헤더 → 본문). 서버가 끊으면 asio 예외
 std::pair<uint16_t, std::vector<uint8_t>> RecvPacket(asio::ip::tcp::socket& socket)
 {
 	PacketHeader hdr{};
@@ -101,8 +101,8 @@ void RunOversize(asio::ip::tcp::socket& socket, int clientNo)
 	spdlog::error("[client {}] server did NOT close the connection", clientNo);
 }
 
-// JSON 요청 하나를 보내고 응답 하나를 받아 출력한다.
-void SendJsonAndPrint(asio::ip::tcp::socket& socket, int clientNo, PacketId id, const nlohmann::json& req)
+// JSON 요청 하나를 보내고 응답 하나를 받아 출력한다. 받은 JSON을 돌려준다 (깨졌으면 is_discarded()).
+nlohmann::json SendJsonAndPrint(asio::ip::tcp::socket& socket, int clientNo, PacketId id, const nlohmann::json& req)
 {
 	auto packet = MakePacket(id, req.dump());
 	asio::write(socket, asio::buffer(packet));
@@ -113,9 +113,45 @@ void SendJsonAndPrint(asio::ip::tcp::socket& socket, int clientNo, PacketId id, 
 	if (resp.is_discarded())
 	{
 		spdlog::error("[client {}] recv id={} invalid json", clientNo, respId);
-		return;
+		return resp;
 	}
 	spdlog::info("[client {}] recv id={} body={}", clientNo, respId, resp.dump());
+	return resp;
+}
+
+// Echo 하나를 보내고 응답을 받아 출력한다.
+void EchoOnce(asio::ip::tcp::socket& socket, int clientNo, const std::string& msg)
+{
+	auto pkt = MakePacket(PacketId::C2S_Echo, msg);
+	asio::write(socket, asio::buffer(pkt));
+	spdlog::info("[client {}] sent echo : {}", clientNo, msg);
+
+	auto [rid, rbody] = RecvPacket(socket);
+	std::string_view text(reinterpret_cast<const char*>(rbody.data()), rbody.size());
+	spdlog::info("[client {}] recv id={} : {}", clientNo, rid, text);
+}
+
+// 한 연결에서: 로그인 → (성공하면) Echo 3번 → 같은 연결로 로그인 한 번 더 (거절돼야 정상)
+// 3-3 로그인 전 차단 / 로그인 후 허용 / 중복 로그인 요청 거절을 확인한다.
+void RunLoginEcho(asio::ip::tcp::socket& socket, int clientNo, const std::string& id, const std::string& pw)
+{
+	const nlohmann::json loginReq = { {"id", id}, {"password", pw} };
+
+	nlohmann::json resp = SendJsonAndPrint(socket, clientNo, PacketId::C2S_Login, loginReq);
+	auto it = resp.find("result");
+	if (resp.is_discarded() || it == resp.end() || !it->is_number() || it->get<int>() != static_cast<int>(AuthResult::Ok))
+	{
+		spdlog::warn("[client {}] login failed, stop (echo now would be disconnected)", clientNo);
+		return;
+	}
+
+	for (int i = 0; i < 3; ++i)
+	{
+		EchoOnce(socket, clientNo, "client" + std::to_string(clientNo) + " after-login " + std::to_string(i));
+	}
+
+	spdlog::info("[client {}] login again on same connection (expect result 1 InvalidRequest)", clientNo);
+	SendJsonAndPrint(socket, clientNo, PacketId::C2S_Login, loginReq);
 }
 
 void RunRegister(asio::ip::tcp::socket& socket, int clientNo, const std::string& id, const std::string& pw, const std::string& nickname)
@@ -134,6 +170,8 @@ int main(int argc, char* argv[])
 	//   모드: normal(기본) | split | split6 | merge | oversize
 	//         register <id> <password> <nickname>
 	//         login    <id> <password>
+	//         loginecho <id> <password>   (로그인 → Echo 3번 → 재로그인 거절 확인)
+	//   주의: 3-3부터 normal/split/merge는 로그인 없이 Echo를 보내므로 서버가 끊는 게 정상
 	int clientNo = argc > 1 ? std::stoi(argv[1]) : 0;
 	std::string mode = argc > 2 ? argv[2] : "normal";
 
@@ -170,9 +208,18 @@ int main(int argc, char* argv[])
 			}
 			RunLogin(socket, clientNo, argv[3], argv[4]);
 		}
+		else if (mode == "loginecho")
+		{
+			if (argc < 5)
+			{
+				spdlog::error("usage: dummy_client.exe <no> loginecho <id> <password>");
+				return 1;
+			}
+			RunLoginEcho(socket, clientNo, argv[3], argv[4]);
+		}
 		else
 		{
-			spdlog::error("unknown mode: {} (normal|split|split6|merge|oversize|register|login)", mode);
+			spdlog::error("unknown mode: {} (normal|split|split6|merge|oversize|register|login|loginecho)", mode);
 			return 1;
 		}
 
