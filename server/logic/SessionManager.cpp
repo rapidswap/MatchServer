@@ -3,7 +3,9 @@
 
 void SessionManager::Add(const std::shared_ptr<ISession>& session)
 {
-	sessions_.emplace(session->Id(), PlayerSession{ session });
+	PlayerSession ps{ session };
+	ps.connectedAt = std::chrono::steady_clock::now();
+	sessions_.emplace(session->Id(), std::move(ps));
 }
 
 void SessionManager::Remove(uint64_t sessionId)

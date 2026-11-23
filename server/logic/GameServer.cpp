@@ -96,6 +96,26 @@ void GameServer::OnDisconnected(std::shared_ptr<ISession> session)
 	spdlog::info("[Logic] session {} disconnected", session->Id());
 }
 
+void GameServer::OnTick(std::chrono::steady_clock::time_point now)
+{
+	constexpr auto kLoginTimeout = std::chrono::seconds(10);
+
+	std::vector <std::shared_ptr<ISession>> expired;
+	sessions_.ForEach([&](PlayerSession& ps)
+		{
+			if (ps.state != LoginState::LoggedIn && now - ps.connectedAt >= kLoginTimeout)
+			{
+				expired.push_back(ps.session);
+			}
+		});
+
+	for (auto& s : expired)
+	{
+		spdlog::info("[Logic] session {} login timeout, disconnect", s->Id());
+		s->Disconnect();
+	}
+}
+
 void GameServer::HandleLogin(const std::shared_ptr<ISession>& session, const nlohmann::json& req)
 {
 	PlayerSession* ps = sessions_.Find(session->Id());

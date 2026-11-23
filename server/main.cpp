@@ -16,6 +16,24 @@ int main()
 		asio::io_context logicIo;
 		auto logicGuard = asio::make_work_guard(logicIo);
 
+		// 1초마다 로직 틱. 타이머를 logicIo에 걸었으므로 콜백(OnTick)은 로직 스레드에서 실행된다.
+		// 스레드들보다 먼저 선언해야 스레드 join 뒤에 파괴된다 (선언 역순 파괴).
+		asio::steady_timer tickTimer(logicIo);
+		std::function<void()> scheduleTick = [&]
+			{
+				tickTimer.expires_after(std::chrono::seconds(1));
+				tickTimer.async_wait([&](const std::error_code& ec)
+					{
+						if (ec)
+						{
+							return; // 취소됨 (종료 중)
+						}
+						gameServer.OnTick(std::chrono::steady_clock::now());
+						scheduleTick();
+					});
+			};
+		scheduleTick();
+
 		Listener listener(io, logicIo, gameServer, 7777);   // 포트가 이미 사용 중이면 여기서 예외
 
 		listener.Start();
