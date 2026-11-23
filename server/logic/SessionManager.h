@@ -41,6 +41,13 @@ public:
 		}
 	}
 
+	uint64_t FindSessionByAccount(uint64_t accountId); // 없으면 0
+	void BindAccount(uint64_t sessionId, uint64_t accountId); // 같은 계정이 있으면 덮어쓴다
+
 private:
 	std::unordered_map<uint64_t, PlayerSession> sessions_;
+	
+	std::unordered_map<uint64_t, uint64_t> byAccount_; // accountId->sessionId
+
+
 };

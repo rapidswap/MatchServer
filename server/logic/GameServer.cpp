@@ -156,10 +156,21 @@ void GameServer::HandleLogin(const std::shared_ptr<ISession>& session, const nlo
 				return;
 			}
 		
+			const uint64_t oldSessionId = sessions_.FindSessionByAccount(info.accountId);
+			if (oldSessionId != 0 && oldSessionId != sessionId)
+			{
+				if (PlayerSession* old = sessions_.Find(oldSessionId))
+				{
+					spdlog::info("[Logic] account {} duplicate login: kick session {} (new session {})", info.accountId, oldSessionId, sessionId);
+					old->state = LoginState::Connected;
+					old->session->Disconnect();
+				}
+			}
 
 			ps->state = LoginState::LoggedIn;
 			ps->accountId = info.accountId;
 			ps->nickname = info.nickname;
+			sessions_.BindAccount(sessionId, info.accountId);
 
 			spdlog::info("[Logic] session {} login ok accountId={}", sessionId, info.accountId);
 			SendJson(*ps->session, PacketId::S2C_LoginResult,
