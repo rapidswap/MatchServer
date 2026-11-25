@@ -11,16 +11,21 @@ find_package(asio CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
+find_package(unofficial-libmysql CONFIG REQUIRED)
+find_package(unofficial-sodium CONFIG REQUIRED)
+
 add_executable(server
 	server/Main.cpp
 	server/net/Listener.cpp
 	server/net/Session.cpp
 	server/logic/GameServer.cpp
 	server/logic/SessionManager.cpp
-	server/db/MemoryAccountStore.cpp    
+	server/db/MemoryAccountStore.cpp
+	server/db/DbConfig.cpp
 )
 
-target_link_libraries(server PRIVATE asio::asio spdlog::spdlog nlohmann_json::nlohmann_json)
+target_link_libraries(server PRIVATE asio::asio spdlog::spdlog nlohmann_json::nlohmann_json
+	unofficial::libmysql::libmysql unofficial-sodium::sodium)
 target_compile_definitions(server PRIVATE _WIN32_WINNT=0x0A00)
 target_include_directories(server PRIVATE shared server)
 target_precompile_headers(server PRIVATE server/pch.h)

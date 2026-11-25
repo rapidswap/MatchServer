@@ -1,5 +1,5 @@
 {
   "name": "matchserver",
   "version": "0.1.0",
-  "dependencies": [ "asio", "spdlog", "nlohmann-json" ]
+  "dependencies": [ "asio", "spdlog", "nlohmann-json", "libmysql", "libsodium" ]
 }
