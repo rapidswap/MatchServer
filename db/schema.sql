@@ -1,0 +1,12 @@
+CREATE DATABASE IF NOT EXISTS matchserver
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+USE matchserver;
+
+CREATE TABLE IF NOT EXISTS accounts (
+  account_id    BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  login_id      VARCHAR(32)  NOT NULL UNIQUE,
+  password_hash VARCHAR(128) CHARACTER SET ascii NOT NULL,
+  nickname      VARCHAR(32)  NOT NULL UNIQUE,
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_login_at DATETIME     NULL
+) ENGINE = InnoDB;
