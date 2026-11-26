@@ -39,3 +39,17 @@ cmake --build --preset my-debug
 - `my-*` 프리셋은 개인용 `CMakeUserPresets.json`(커밋 안 함)에 있고 `VCPKG_ROOT=C:/vcpkg`를 넣어준다.
   팀원은 `VCPKG_ROOT` 환경 변수를 설정하고 `vs2026` / `debug` 프리셋을 쓴다
 - 실행 파일: build\Debug\server.exe, build\Debug\dummy_client.exe (상대 경로는 프로젝트 루트에서 실행)
+
+## 실행·접속 방식 (배포)
+- 서버는 별도의 서버 PC에서 실행하고, 포트는 `7777`(TCP)이다. 그 PC에서 이 저장소의 코드를 빌드해 실행한다. 클라이언트 접속은 확인 완료.
+- 실제 서버 주소는 공개 저장소에 올리지 않는다. 주소와 접속 메모는 `CLAUDE.local.md`(커밋 안 함, `.gitignore`)에 둔다.
+- 클라이언트(언리얼)는 주소를 코드에 박지 않고 언리얼 프로젝트의 `Config/DefaultGame.ini`에서 읽는다.
+  ```
+  [/Script/ExpeditionKamen.EKNetSubsystem]
+  ServerHost=<서버 PC 주소>
+  ServerPort=7777
+  ```
+  (언리얼 저장소: `2nd_TeamProject/Expedition-Kamen`, 비공개 팀 저장소라 그쪽 ini에는 실제 주소가 들어간다. `EKNetSubsystem`이 읽는다.) 서버 주소·포트를 바꾸면 이 값도 같이 맞춘다.
+- 서버 주소, 비밀번호, DB 접속 정보는 이 저장소에 커밋하지 않는다(`CLAUDE.local.md`, `config/local.json`, `secrets/`).
+- 서버 코드를 만들 때는 "다른 PC에서 접속받는 서버"로 생각한다: `0.0.0.0` 바인딩, 방화벽 TCP 7777 허용, DB는 서버와 같은 PC의 로컬 MySQL.
+- 패킷 정의는 `shared/PacketDefs.h`와 언리얼의 `EKPacket.h`를 항상 같은 값으로 유지한다.

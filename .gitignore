@@ -51,6 +51,8 @@ config/local*.json
 
 # ===== Claude Code 개인 설정 =====
 .claude/settings.local.json
+# 공개하면 안 되는 환경 메모 (서버 PC 주소 등)
+CLAUDE.local.md
 
 # ===== OS =====
 Thumbs.db
