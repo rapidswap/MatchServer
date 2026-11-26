@@ -5,7 +5,9 @@
 #include "logic/GameServer.h"
 #include "db/MemoryAccountStore.h"
 #include "db/DbConfig.h"
+#include "db/PasswordHasher.h"
 #include <mysql/mysql.h>
+#include <chrono>
 
 // 3-B-2 임시: 설정대로 DB에 붙었다가 바로 끊어 본다. 3-B-4에서 MySqlAccountStore(DB 스레드)로 옮긴다.
 static bool CheckDbConnection(const DbConfig& cfg)
@@ -36,6 +38,30 @@ static bool CheckDbConnection(const DbConfig& cfg)
 int main()
 {
 	spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] [t%t] %v");
+
+	if (!InitPasswordHasher())
+	{
+		return 1;
+	}
+
+	// 3-B-3 임시 테스트: 3-B-4에서 지운다.
+	{
+		const auto start = std::chrono::steady_clock::now();
+		const std::optional<std::string> h1 = HashPassword("test1234");
+		const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+		const std::optional<std::string> h2 = HashPassword("test1234");
+
+		if (!h1 || !h2)
+		{
+			return 1;
+		}
+
+		spdlog::info("[HasherTest] len={} time={}ms", h1->size(), elapsed);
+		spdlog::info("[HasherTest] same pw, different hash: {}", *h1 != *h2);        // true
+		spdlog::info("[HasherTest] verify correct: {}", VerifyPassword(*h1, "test1234")); // true
+		spdlog::info("[HasherTest] verify wrong: {}", VerifyPassword(*h1, "test1235"));   // false
+		spdlog::info("[HasherTest] verify h2: {}", VerifyPassword(*h2, "test1234"));      // true
+	}
 
 	// DB 없이는 가입/로그인을 못 하므로 설정이나 접속이 안 되면 서버를 띄우지 않는다.
 	const std::optional<DbConfig> dbConfig = LoadDbConfig("config/local.json");

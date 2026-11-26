@@ -22,6 +22,7 @@ add_executable(server
 	server/logic/SessionManager.cpp
 	server/db/MemoryAccountStore.cpp
 	server/db/DbConfig.cpp
+	server/db/PasswordHasher.cpp
 )
 
 target_link_libraries(server PRIVATE asio::asio spdlog::spdlog nlohmann_json::nlohmann_json
