@@ -23,6 +23,7 @@ add_executable(server
 	server/db/MemoryAccountStore.cpp
 	server/db/DbConfig.cpp
 	server/db/PasswordHasher.cpp
+	server/db/MySqlAccountStore.cpp
 )
 
 target_link_libraries(server PRIVATE asio::asio spdlog::spdlog nlohmann_json::nlohmann_json
