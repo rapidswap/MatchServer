@@ -29,6 +29,9 @@ public:
 private:
 	bool Connect();
 
+	// 아래는 DB 스레드에서만 호출한다 (블로킹).
+	AuthResult DoRegister(const std::string& loginId, const std::string& password, const std::string& nickname);
+
 private:
 	DbConfig config_;
 	asio::io_context& logicIo_;
