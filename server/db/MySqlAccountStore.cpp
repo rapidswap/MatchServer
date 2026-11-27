@@ -21,6 +21,23 @@ namespace
 		bind.buffer_length = static_cast<unsigned long>(str.size());
 
 	}
+	
+	// 숫자 바인딩. 입력하면 value를 읽고, 출력이면 fetch 때 value를 쓴다.
+	void BindUInt64(MYSQL_BIND& bind, uint64_t& value)
+	{
+		bind.buffer_type = MYSQL_TYPE_LONGLONG;
+		bind.buffer = &value;
+		bind.is_unsigned = true;
+	}
+
+	// 출력용 문자열 바인딩. fetch가 buf에 쓰고, 실제 길이를 length에 넣는다.
+	void BindOutString(MYSQL_BIND& bind, char* buf, unsigned long bufSize, unsigned long& length)
+	{
+		bind.buffer_type = MYSQL_TYPE_STRING;
+		bind.buffer = buf;
+		bind.buffer_length = bufSize;
+		bind.length = &length;
+	}
 
 }
 
@@ -93,12 +110,13 @@ void MySqlAccountStore::Register(std::string loginId, std::string password, std:
 
 void MySqlAccountStore::Login(std::string loginId, std::string password, LoginCallback loginCallback)
 {
-	asio::post(dbIo_, [this, loginCallback = std::move(loginCallback)]()mutable
+	asio::post(dbIo_, [this,loginId=std::move(loginId),password=std::move(password), loginCallback = std::move(loginCallback)]()mutable
 		{
-			spdlog::info("[DB] login (stub)");
-			asio::post(logicIo_, [loginCallback = std::move(loginCallback)]
+			AccountInfo info;
+			const AuthResult result = DoLogin(loginId, password, info);
+			asio::post(logicIo_, [loginCallback = std::move(loginCallback),result,info=std::move(info)]
 				{
-					loginCallback(AuthResult::ServerError, {});
+					loginCallback(result,std::move(info));
 				});
 		});
 }
@@ -154,6 +172,110 @@ AuthResult MySqlAccountStore::DoRegister(const std::string& loginId, const std::
 
 	spdlog::info("[DB] registered accountId={}", mysql_stmt_insert_id(stmt.get()));
 	return AuthResult::Ok;
+}
+
+AuthResult MySqlAccountStore::DoLogin(const std::string& loginId, const std::string& password, AccountInfo& outInfo)
+{
+	StmtPtr stmt(mysql_stmt_init(conn_));
+	if (!stmt)
+	{
+		spdlog::error("[DB] mysql_stmt_init failed: {}", mysql_error(conn_));
+		return AuthResult::ServerError;
+	}
+
+	constexpr std::string_view sql = "SELECT account_id,password_hash,nickname FROM accounts WHERE login_id = ?";
+	if (mysql_stmt_prepare(stmt.get(), sql.data(), static_cast<unsigned long>(sql.size())) != 0)
+	{
+		spdlog::error("[DB] login prepare failed: {}", mysql_stmt_error(stmt.get()));
+		return AuthResult::ServerError;
+	}
+
+	// 입력: login_id
+	MYSQL_BIND param[1] = {};
+	BindString(param[0], loginId);
+	if (mysql_stmt_bind_param(stmt.get(), param))
+	{
+		spdlog::error("[DB] login bind param failed: {}", mysql_stmt_error(stmt.get()));
+		return AuthResult::ServerError;
+	}
+
+	if (mysql_stmt_execute(stmt.get()) != 0)
+	{
+		spdlog::error("[DB] login execute failed ({}): {}", mysql_stmt_errno(stmt.get()), mysql_stmt_error(stmt.get()));
+		return AuthResult::ServerError;
+	}
+
+
+	// 출력: SELECT 컬럼 순서대로.
+	uint64_t accountId = 0;
+	char hashBuf[128 + 1] = {}; // password_hash VARCHAR(128) ascii.
+	char nicknameBuf[32 + 4 + 1] = {}; // nickname VARCHAR(32) utf8mb4 (한 글자 최대 4바이트).
+	unsigned long hashLen = 0;
+	unsigned long nicknameLen = 0;
+
+	MYSQL_BIND result[3] = {};
+	BindUInt64(result[0], accountId);
+	BindOutString(result[1], hashBuf, sizeof(hashBuf), hashLen);
+	BindOutString(result[2], nicknameBuf, sizeof(nicknameBuf), nicknameLen);
+
+	if (mysql_stmt_bind_result(stmt.get(), result)) // 실패하면 true
+	{
+		spdlog::error("[DB] login bind result failed: {}", mysql_stmt_error(stmt.get()));
+		return AuthResult::ServerError;
+	}
+
+	// 결과를 클라 메모리로 다 받아 둔다 -> 아래 UPDATE를 같은 연결로 보낼 수 있다.
+	if (mysql_stmt_store_result(stmt.get()) != 0)
+	{
+		spdlog::error("[DB] login store result failed: {}", mysql_stmt_error(stmt.get()));
+		return AuthResult::ServerError;
+	}
+
+	const int fetch = mysql_stmt_fetch(stmt.get());
+	if (fetch == MYSQL_NO_DATA)
+	{
+		return AuthResult::WrongCredentials; // ID 없음 (비번 틀림과 구분 안 함)
+	}
+
+	if (fetch != 0)
+	{
+		// 1: 에러, MYSQL_DATA_TRUNCATED: 버퍼가 작음 (스키마와 버퍼 크기 불일치 = 버그)
+		spdlog::error("[DB] login fetch failed ({}): {}", fetch, mysql_stmt_error(stmt.get()));
+		return AuthResult::ServerError;
+	}
+
+	if (!VerifyPassword(std::string(hashBuf, hashLen), password))
+	{
+		return AuthResult::WrongCredentials;
+	}
+
+	outInfo.accountId = accountId;
+	outInfo.nickname.assign(nicknameBuf, nicknameLen);
+
+	UpdateLastLogin(accountId);
+	spdlog::info("[DB] login ok accountId={}", accountId);
+	return AuthResult::Ok;
+}
+
+void MySqlAccountStore::UpdateLastLogin(uint64_t accountId)
+{
+	StmtPtr stmt(mysql_stmt_init(conn_));
+	if (!stmt)
+	{
+		spdlog::warn("[DB] last_login stmt_init failed: {}", mysql_error(conn_));
+		return;
+	}
+
+	constexpr std::string_view sql = "UPDATE accounts SET last_login_at = NOW() WHERE account_id = ?";
+	MYSQL_BIND param[1] = {};
+	BindUInt64(param[0], accountId);
+
+	if (mysql_stmt_prepare(stmt.get(), sql.data(), static_cast<unsigned long>(sql.size())) != 0
+		|| mysql_stmt_bind_param(stmt.get(), param)
+		|| mysql_stmt_execute(stmt.get()) != 0)
+	{
+		spdlog::warn("[DB] last_login update failed: {}", mysql_stmt_error(stmt.get()));
+	}
 }
 
 bool MySqlAccountStore::Connect()

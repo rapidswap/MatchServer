@@ -32,6 +32,12 @@ private:
 	// 아래는 DB 스레드에서만 호출한다 (블로킹).
 	AuthResult DoRegister(const std::string& loginId, const std::string& password, const std::string& nickname);
 
+	// 성공하면 outInfo를 채운다.
+	AuthResult DoLogin(const std::string& loginId, const std::string& password, AccountInfo& outInfo);
+
+	// 실패해도 로그인은 성공으로 둔다.(부가정보)
+	void UpdateLastLogin(uint64_t accountId);
+
 private:
 	DbConfig config_;
 	asio::io_context& logicIo_;
